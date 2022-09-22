@@ -2,10 +2,11 @@
 #Author: Francis Dowuona
 
 import os
-from types import NoneType
 import arcpy
 
-defaultxLSfile = os.path.join(os.path.dirname(arcpy.env.scratchWorkspace),'TableToFeature.xls')
+wkspace = arcpy.env.scratchWorkspace
+
+defaultxLSfile = os.path.join(os.path.dirname(wkspace),'TableToFeature.xls')
 
 def uniquefileName(filepath):
     filename, extension = os.path.splitext(filepath)
@@ -21,27 +22,54 @@ def uniquefileName(filepath):
 def getexportfileFormat(filepath):
     filename = os.path.splitext(os.path.basename(filepath))[0]
 
-    file = os.path.join(os.path.dirname(arcpy.env.workspace), filename + '_ExportFile.xls') 
+    file = os.path.join(os.path.dirname(wkspace), filename + '_ExportFile.xls') 
 
     return uniquefileName(file)
+
+def gpxtopolygon(inputGPXfile, outputFeature):
+            try:
+                arcpy.conversion.GPXtoFeatures(inputGPXfile,arcpy.os.path.join(wkspace,'WayPoints'))
+
+                polygons={}
+                with arcpy.da.SearchCursor(arcpy.os.path.join(wkspace,'WayPoints'), ['Shape@XYZ','Descript']) as sc:
+                    for x in sc:
+                        if x[1] not in polygons.keys():
+                            polygons[x[1]] = [[x[0][0],x[0][1]]]
+                        else:
+                            polygons[x[1]].append([x[0][0],x[0][1]])
+                            
+                arcpy.management.Delete(arcpy.os.path.join(wkspace,'WayPoints'))
+
+                arcpy.management.CreateFeatureclass(arcpy.os.path.dirname(outputFeature),arcpy.os.path.basename(outputFeature),
+                                                    'POLYGON','','DISABLED','DISABLED',arcpy.SpatialReference(4326))
+                arcpy.management.AddField(outputFeature,'Descript', 'TEXT','','','50','Descript', 'NULLABLE', 'NON_REQUIRED','')
+
+                with arcpy.da.InsertCursor(outputFeature, ['Shape@','Id','Descript']) as ic:
+                    for x in polygons:
+                        arr = arcpy.Array(arcpy.Point(*coord)for coord in polygons[x])
+                        _newpoly = arcpy.Polygon(arr, arcpy.SpatialReference(4326))
+                        desc_ = x
+                        _id = 0
+                        ic.insertRow((_newpoly,_id,desc_))
+            except arcpy.ExecuteError as err:
+                arcpy.AddError(err)
 
 
 def tableToFeature(table, _x_field, y_field, interval, spatialreference, outputFeature, 
                     export_to_file= False, exportfile=''):
             try:
-                workspace = arcpy.env.scratchWorkspace
                 #Process: Make XY Event Layer of input Table
                 table_Layer = "table_Layer"
                 arcpy.management.MakeXYEventLayer(table, _x_field, y_field, 'table_Layer', spatialreference)
 
                 #Process: Make Line Feature from Event Layer
-                arcpy.management.PointsToLine(table_Layer, arcpy.os.path.join(workspace,'PointsToLine'), '', '', 'NO_CLOSE')
+                arcpy.management.PointsToLine(table_Layer, arcpy.os.path.join(wkspace,'PointsToLine'), '', '', 'NO_CLOSE')
 
-                arcpy.edit.Densify(arcpy.os.path.join(workspace,'PointsToLine'), 'DISTANCE', interval, '', '')
+                arcpy.edit.Densify(arcpy.os.path.join(wkspace,'PointsToLine'), 'DISTANCE', interval, '', '')
 
-                arcpy.management.FeatureVerticesToPoints(arcpy.os.path.join(workspace,'PointsToLine'), outputFeature, 'ALL')
+                arcpy.management.FeatureVerticesToPoints(arcpy.os.path.join(wkspace,'PointsToLine'), outputFeature, 'ALL')
 
-                arcpy.management.Delete(arcpy.os.path.join(workspace,'PointsToLine'))
+                arcpy.management.Delete(arcpy.os.path.join(wkspace,'PointsToLine'))
 
                 arcpy.management.AddGeometryAttributes(outputFeature, 'POINT_X_Y_Z_M', '', '', spatialreference)
 
@@ -186,33 +214,6 @@ class GPXToPolygon(object):
 
     def execute(self, params, messages):
         """The source code of the tool."""
-        def executeProcess(inputGPXfile, outputFeature):
-            try:
-                arcpy.conversion.GPXtoFeatures(inputGPXfile,arcpy.os.path.join(arcpy.env.scratchWorkspace,'WayPoints'))
-
-                polygons={}
-                with arcpy.da.SearchCursor(arcpy.os.path.join(arcpy.env.scratchWorkspace,'WayPoints'), ['Shape@XYZ','Descript']) as sc:
-                    for x in sc:
-                        if x[1] not in polygons.keys():
-                            polygons[x[1]] = [[x[0][0],x[0][1]]]
-                        else:
-                            polygons[x[1]].append([x[0][0],x[0][1]])
-                            
-                arcpy.management.Delete(arcpy.os.path.join(arcpy.env.scratchWorkspace,'WayPoints'))
-
-                arcpy.management.CreateFeatureclass(arcpy.os.path.dirname(outputFeature),arcpy.os.path.basename(outputFeature),
-                                                    'POLYGON','','DISABLED','DISABLED',arcpy.SpatialReference(4326))
-                arcpy.management.AddField(outputFeature,'Descript', 'TEXT','','','50','Descript', 'NULLABLE', 'NON_REQUIRED','')
-
-                with arcpy.da.InsertCursor(outputFeature, ['Shape@','Id','Descript']) as ic:
-                    for x in polygons:
-                        arr = arcpy.Array(arcpy.Point(*coord)for coord in polygons[x])
-                        _newpoly = arcpy.Polygon(arr, arcpy.SpatialReference(4326))
-                        desc_ = x
-                        _id = 0
-                        ic.insertRow((_newpoly,_id,desc_))
-            except arcpy.ExecuteError as err:
-                arcpy.AddError(err)
         if __name__ == '__main__':
-            executeProcess(params[0].valueAsText, params[1].valueAsText)
+            gpxtopolygon(params[0].valueAsText, params[1].valueAsText)
         return
