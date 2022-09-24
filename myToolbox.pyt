@@ -3,9 +3,6 @@ import os
 
 wkspace = arcpy.env.scratchWorkspace
 
-def getfilename(path):
-    return os.path.splitext(os.path.basename(path))[0]
-
 def gpxtoPolygon(Inputgpxfile, outputfeature):
     arcpy.GPXtoFeatures_conversion(Input_GPX_File=Inputgpxfile, Output_Feature_class= os.path.join(wkspace,'tempPoints'))
     polygons={}
