@@ -16,15 +16,15 @@ def gpxtoPolygon(Inputgpxfile, outputfeature):
             else:
                 polygons[i[1]].append([i[0][0], i[0][1]])
     arcpy.Delete_management(os.path.join(wkspace,'tempPoints'))
-    arcpy.CreateFeatureclass_management(os.path.dirname(outputfeature),getfilename(outputfeature),geometry_type='POLYGON',
+    arcpy.CreateFeatureclass_management(os.path.dirname(outputfeature),os.path.basename(outputfeature),geometry_type='POLYGON',
                                         has_m='DISABLED',has_z='DISABLED',spatial_reference=arcpy.SpatialReference(4326))
     arcpy.AddField_management(outputfeature,field_name='Descript', field_type='TEXT', field_length='50')
-    ic = arcpy.da.InsertCursor(outputfeature, ['Shape@','Id','Descript'])
+    ic = arcpy.da.InsertCursor(outputfeature, ['Shape@','Descript'])
     for i in polygons:
         arr = arcpy.Array([arcpy.Point(*coords)for coords in polygons[i]])
         arr.append(arr[0])
         newpoly = arcpy.Polygon(arr, arcpy.SpatialReference(4326))
-        ic.insertRow((newpoly,0,i))
+        ic.insertRow((newpoly,i))
 
 class Toolbox(object):
     def __init__(self):
