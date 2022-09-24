@@ -42,7 +42,7 @@ class GPXToPolygon(object):
         """Define the tool (tool name is the name of the class)."""
         self.label = "GPX To Polygon"
         self.description = ""
-        self.canRunInBackground = True
+        self.canRunInBackground = False
         self.category = 'Conversion'
 
     def getParameterInfo(self):
@@ -53,7 +53,7 @@ class GPXToPolygon(object):
         param0.filter.list=['gpx']
         param1 = arcpy.Parameter(name='outputFeature',displayName='Output Feature Class',
                                 direction='Output',parameterType='Required',
-                                datatype='DEShapeFile')
+                                datatype='DEFeatureClass')
         params = [param0,param1]
         return params
 
