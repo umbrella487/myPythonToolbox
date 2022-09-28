@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import arcpy
+import ConversionUtils
 import os
 
 wkspace = arcpy.env.scratchWorkspace
@@ -13,7 +14,7 @@ def uniquify(file):
         counter+=1
     return file
 
-defaultxlsFile = uniquify(os.path.join(os.path.dirname(wkspace),'TableToPointsExportFile.xls'))
+defaultxlsFile = os.path.join(os.path.dirname(wkspace),'TableToPointsExportFile.xls')
 
 def tabletoPolygon(table, x_field, y_field, description_field, _spatial_reference, outputfeature):
 
@@ -59,6 +60,29 @@ def _gpxtoPolygon(inputGPXfile, outputFeature):
         ic.insertRow((newpoly,i))
     return
 
+def _gpxtoPolygon_multiple(inputGPXfiles, outputFeature):
+    polygons={}
+    inputGPXfiles = ConversionUtils.SplitMultiInputs(inputGPXfiles)
+    for inputgpxfile in inputGPXfiles:
+        arcpy.GPXtoFeatures_conversion(Input_GPX_File= inputgpxfile, Output_Feature_class= os.path.join(wkspace,'Points'))
+        with arcpy.da.SearchCursor(os.path.join(wkspace,'Points'),['Shape@XYZ','Descript']) as sc:
+            for i in sc:
+                if i[1] not in polygons.keys():
+                    polygons[i[1]] = [[i[0][0], i[0][1]]]
+                else:
+                    polygons[i[1]].append([i[0][0], i[0][1]])
+        arcpy.Delete_management(os.path.join(wkspace,'Points'))
+    arcpy.CreateFeatureclass_management(os.path.dirname(outputFeature),os.path.basename(outputFeature),geometry_type='POLYGON',
+                                        has_m='DISABLED',has_z='DISABLED',spatial_reference=arcpy.SpatialReference(4326))
+    arcpy.AddField_management(outputFeature,field_name='Descript', field_type='TEXT', field_length='50')
+    ic = arcpy.da.InsertCursor(outputFeature, ['Shape@','Descript'])
+    for i in polygons:
+        arr = arcpy.Array([arcpy.Point(*coords)for coords in polygons[i]])
+        arr.append(arr[0])
+        newpoly = arcpy.Polygon(arr, arcpy.SpatialReference(4326))
+        ic.insertRow((newpoly,i))
+    return
+
 def _interpolate(in_table, x_field, y_field, interval, spatial_reference, outputfeature, export_to_file=False, exportFile = ''):
     Temp_point = 'Temp_point'
     arcpy.MakeXYEventLayer_management(table=in_table, in_x_field=x_field, in_y_field=y_field, out_layer=Temp_point, 
@@ -84,9 +108,10 @@ class Toolbox(object):
         self.alias = "toolbox"
 
         # List of tool classes associated with this toolbox
-        self.tools = [GPXToPolygon,TableToPolygon,TableToPoints]
+        self.tools = [GPXToPolygon,GPXToPolygonMul,TableToPolygon,TableToPoints]
 
 class GPXToPolygon(object):
+    
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
         self.label = "GPX To Polygon"
@@ -126,6 +151,51 @@ class GPXToPolygon(object):
         if __name__ == '__main__':
             try:
                 _gpxtoPolygon(params[0].valueAsText, params[1].valueAsText)
+            except arcpy.ExecuteError as err:
+                arcpy.AddError(err)
+        return
+
+class GPXToPolygonMul(object):
+    
+    def __init__(self):
+        """Define the tool (tool name is the name of the class)."""
+        self.label = "GPX To Polygon(Multiple)"
+        self.description = ""
+        self.canRunInBackground = False
+        self.category = 'Conversion'
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        param0 = arcpy.Parameter(name='gpxfile',displayName='Input GPX File',
+                                direction='Input',parameterType='Required',
+                                datatype='DEFile', multiValue='True')
+        param0.filter.list=['gpx']
+        param1 = arcpy.Parameter(name='outputFeature',displayName='Output Feature Class',
+                                direction='Output',parameterType='Required',
+                                datatype='DEFeatureClass')
+        params = [param0,param1]
+        return params
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        return True
+
+    def updateParameters(self, params):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        return
+
+    def updateMessages(self, params):
+        """Modify the messages created by internal validation for each tool
+        parameter.  This method is called after internal validation."""
+        return
+
+    def execute(self, params, messages):
+        """The source code of the tool."""
+        if __name__ == '__main__':
+            try:
+                _gpxtoPolygon_multiple(params[0].valueAsText, params[1].valueAsText)
             except arcpy.ExecuteError as err:
                 arcpy.AddError(err)
         return
@@ -234,7 +304,7 @@ class TableToPoints(object):
                                 direction='Output',parameterType='Required',
                                 datatype='DEFile', enabled='False')
         param7.filter.list=['xls']
-        param7.value = defaultxlsFile
+        param7.value = uniquify(defaultxlsFile)
         params = [param0,param1,param2,param3,param4,param5,param6,param7]
 
         return params
