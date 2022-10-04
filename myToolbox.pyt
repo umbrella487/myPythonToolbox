@@ -39,47 +39,29 @@ def tabletoPolygon(table, x_field, y_field, description_field, _spatial_referenc
         ic.insertRow((newpoly,i))
     return
 
-def _gpxtoPolygon(inputGPXfile, outputFeature):
-    arcpy.GPXtoFeatures_conversion(Input_GPX_File= inputGPXfile, Output_Feature_class= os.path.join(wkspace,'Points'))
-    polygons={}
-    with arcpy.da.SearchCursor(os.path.join(wkspace,'Points'),['Shape@XYZ','Descript']) as sc:
-        for i in sc:
-            if i[1] not in polygons.keys():
-                polygons[i[1]] = [[i[0][0], i[0][1]]]
-            else:
-                polygons[i[1]].append([i[0][0], i[0][1]])
-    arcpy.Delete_management(os.path.join(wkspace,'Points'))
-    arcpy.CreateFeatureclass_management(os.path.dirname(outputFeature),os.path.basename(outputFeature),geometry_type='POLYGON',
-                                        has_m='DISABLED',has_z='DISABLED',spatial_reference=arcpy.SpatialReference(4326))
-    arcpy.AddField_management(outputFeature,field_name='Descript', field_type='TEXT', field_length='50')
-    ic = arcpy.da.InsertCursor(outputFeature, ['Shape@','Descript'])
-    for i in polygons:
-        arr = arcpy.Array([arcpy.Point(*coords)for coords in polygons[i]])
-        arr.append(arr[0])
-        newpoly = arcpy.Polygon(arr, arcpy.SpatialReference(4326))
-        ic.insertRow((newpoly,i))
-    return
-
-def _gpxtoPolygon_multiple(inputGPXfiles, outputFeature):
+def _gpxtoPolygon(inputGPXfiles, description_field, project_coord, outputFeature):
     polygons={}
     inputGPXfiles = ConversionUtils.SplitMultiInputs(inputGPXfiles)
     for inputgpxfile in inputGPXfiles:
         arcpy.GPXtoFeatures_conversion(Input_GPX_File= inputgpxfile, Output_Feature_class= os.path.join(wkspace,'Points'))
-        with arcpy.da.SearchCursor(os.path.join(wkspace,'Points'),['Shape@XYZ','Descript']) as sc:
+        arcpy.Project_management(in_dataset= os.path.join(wkspace,'Points'), out_dataset= os.path.join(wkspace,'PointsTemp_project'),
+                            in_coor_system=arcpy.SpatialReference(4326),out_coor_system=project_coord)
+        arcpy.Delete_management(os.path.join(wkspace,'Points'))
+        with arcpy.da.SearchCursor(os.path.join(wkspace,'PointsTemp_project'),['Shape@XYZ',description_field]) as sc:
             for i in sc:
                 if i[1] not in polygons.keys():
                     polygons[i[1]] = [[i[0][0], i[0][1]]]
                 else:
                     polygons[i[1]].append([i[0][0], i[0][1]])
-        arcpy.Delete_management(os.path.join(wkspace,'Points'))
+        arcpy.Delete_management(os.path.join(wkspace,'PointsTemp_project'))
     arcpy.CreateFeatureclass_management(os.path.dirname(outputFeature),os.path.basename(outputFeature),geometry_type='POLYGON',
-                                        has_m='DISABLED',has_z='DISABLED',spatial_reference=arcpy.SpatialReference(4326))
-    arcpy.AddField_management(outputFeature,field_name='Descript', field_type='TEXT', field_length='50')
-    ic = arcpy.da.InsertCursor(outputFeature, ['Shape@','Descript'])
+                                        has_m='DISABLED',has_z='DISABLED',spatial_reference=project_coord)
+    arcpy.AddField_management(outputFeature,field_name=description_field, field_type='TEXT', field_length='50')
+    ic = arcpy.da.InsertCursor(outputFeature, ['Shape@',description_field])
     for i in polygons:
         arr = arcpy.Array([arcpy.Point(*coords)for coords in polygons[i]])
         arr.append(arr[0])
-        newpoly = arcpy.Polygon(arr, arcpy.SpatialReference(4326))
+        newpoly = arcpy.Polygon(arr, project_coord)
         ic.insertRow((newpoly,i))
     return
 
@@ -108,7 +90,8 @@ class Toolbox(object):
         self.alias = "toolbox"
 
         # List of tool classes associated with this toolbox
-        self.tools = [GPXToPolygon,GPXToPolygonMul,TableToPolygon,TableToPoints]
+        self.tools = [GPXToPolygon,TableToPolygon,TableToPoints]
+
 
 class GPXToPolygon(object):
     
@@ -123,12 +106,20 @@ class GPXToPolygon(object):
         """Define parameter definitions"""
         param0 = arcpy.Parameter(name='gpxfile',displayName='Input GPX File',
                                 direction='Input',parameterType='Required',
-                                datatype='DEFile')
+                                datatype='DEFile' , multiValue='True')
         param0.filter.list=['gpx']
-        param1 = arcpy.Parameter(name='outputFeature',displayName='Output Feature Class',
+        param1 = arcpy.Parameter(name='desc_field', displayName='Name Column',direction='Input',
+                                    parameterType='Optional',datatype='String')
+        param1.filter.type = 'ValueList'
+        param1.filter.list = ['Name','Descript']
+        param1.value = param1.filter.list[0]
+        param2 = arcpy.Parameter(name='srref', displayName='Output Coordinate System',
+                                    datatype='Coordinate System', direction='Input',parameterType='Optional')
+        param2.value = "GEOGCS['GCS_WGS_1984',DATUM['D_WGS_1984',SPHEROID['WGS_1984',6378137.0,298.257223563]],PRIMEM['Greenwich',0.0],UNIT['Degree',0.0174532925199433]]"
+        param3 = arcpy.Parameter(name='outputFeature',displayName='Output Feature Class',
                                 direction='Output',parameterType='Required',
                                 datatype='DEFeatureClass')
-        params = [param0,param1]
+        params = [param0,param1,param2,param3]
         return params
 
     def isLicensed(self):
@@ -150,52 +141,7 @@ class GPXToPolygon(object):
         """The source code of the tool."""
         if __name__ == '__main__':
             try:
-                _gpxtoPolygon(params[0].valueAsText, params[1].valueAsText)
-            except arcpy.ExecuteError as err:
-                arcpy.AddError(err)
-        return
-
-class GPXToPolygonMul(object):
-    
-    def __init__(self):
-        """Define the tool (tool name is the name of the class)."""
-        self.label = "GPX To Polygon(Multiple)"
-        self.description = ""
-        self.canRunInBackground = False
-        self.category = 'Conversion'
-
-    def getParameterInfo(self):
-        """Define parameter definitions"""
-        param0 = arcpy.Parameter(name='gpxfile',displayName='Input GPX File',
-                                direction='Input',parameterType='Required',
-                                datatype='DEFile', multiValue='True')
-        param0.filter.list=['gpx']
-        param1 = arcpy.Parameter(name='outputFeature',displayName='Output Feature Class',
-                                direction='Output',parameterType='Required',
-                                datatype='DEFeatureClass')
-        params = [param0,param1]
-        return params
-
-    def isLicensed(self):
-        """Set whether tool is licensed to execute."""
-        return True
-
-    def updateParameters(self, params):
-        """Modify the values and properties of parameters before internal
-        validation is performed.  This method is called whenever a parameter
-        has been changed."""
-        return
-
-    def updateMessages(self, params):
-        """Modify the messages created by internal validation for each tool
-        parameter.  This method is called after internal validation."""
-        return
-
-    def execute(self, params, messages):
-        """The source code of the tool."""
-        if __name__ == '__main__':
-            try:
-                _gpxtoPolygon_multiple(params[0].valueAsText, params[1].valueAsText)
+                _gpxtoPolygon(params[0].valueAsText, params[1].valueAsText, params[2].valueAsText, params[3].valueAsText)
             except arcpy.ExecuteError as err:
                 arcpy.AddError(err)
         return
