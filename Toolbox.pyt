@@ -17,6 +17,30 @@ def bname(path):
             b_name = b_name.replace('-','_')
     return b_name
 
+def table_to_points(xytable,xfield,yfield,coord_sys,interval,outputFeature,export_condition='', exportFile=''):
+    try:
+        points='points'
+        arcpy.MakeXYEventLayer_management(xytable, xfield, yfield, points, coord_sys, '')
+
+        arcpy.PointsToLine_management(points, r"in_memory\{}_Line".format(bname(xytable)))
+
+        arcpy.Densify_edit( r"in_memory\{}_Line".format(bname(xytable)), 'DISTANCE', interval)
+
+        arcpy.FeatureVerticesToPoints_management( r"in_memory\{}_Line".format(bname(xytable)), outputFeature, 'ALL')
+
+        if export_condition == 'EXPORT_TO_FILE':
+            arcpy.Copy_management(outputFeature, r'in_memory\{}_copy'.format(bname(outputFeature)))
+            arcpy.AddGeometryAttributes_management(r'in_memory\{}_copy'.format(bname(outputFeature)), 'POINT_X_Y_Z_M','','',coord_sys)
+            arcpy.TableToExcel_conversion(r'in_memory\{}_copy'.format(bname(outputFeature)), exportFile)
+        pass
+    except arcpy.ExecuteError as err:
+        arcpy.AddError(err)
+    finally:
+        if arcpy.Exists( r"in_memory\{}_Line".format(bname(xytable))):
+            arcpy.Delete_management( r"in_memory\{}_Line".format(bname(xytable)))
+        if arcpy.Exists(r'in_memory\{}_copy'.format(bname(outputFeature))):
+            arcpy.Delete_management(r'in_memory\{}_copy'.format(bname(outputFeature)))
+
 def tabletopolygon(xytable, x_field, y_field, descipt_field, in_coord_sys, project_condtion, out_coord_sys, outputfeature):
 
     try:
@@ -119,8 +143,7 @@ class Toolbox(object):
         self.alias = ""
 
         # List of tool classes associated with this toolbox
-        self.tools = [TableToPolygon,GPXToPolygon]
-
+        self.tools = [TableToPolygon,GPXToPolygon,TableToPoint]
 
 class TableToPolygon(object):
     def __init__(self):
@@ -254,4 +277,70 @@ class GPXToPolygon(object):
         gpx_to_polygon(params[0].valueAsText,params[1].valueAsText,
                         params[2].valueAsText,params[3].valueAsText,
                         params[4].valueAsText,params[5].valueAsText)
+        return
+
+class TableToPoint(object):
+    def __init__(self):
+        """Define the tool (tool name is the name of the class)."""
+        self.label = "Table To Points"
+        self.description = ""
+        self.canRunInBackground = False
+        self.category = 'Interpolation'
+
+    def getParameterInfo(self):
+        """Define parameter definitions"""
+        param0 = arcpy.Parameter(name='param0', displayName='XY Table',parameterType='Required',
+                                    datatype='GPTableView', direction='Input')
+        param1 = arcpy.Parameter(name='param1', displayName='X Field',parameterType='Required',
+                                    datatype='Field', direction='Input')
+        param2 = arcpy.Parameter(name='param2', displayName='Y Field',parameterType='Required',
+                                    datatype='Field', direction='Input')   
+
+        param1.filter.list = param2.filter.list = ['LONG','DOUBLE','FLOAT']                          
+        param1.parameterDependencies = param2.parameterDependencies = [param0.name]
+        #
+        param3 = arcpy.Parameter(name='param3', displayName='Coordinate System',parameterType='Required',
+                                    datatype='Coordinate System', direction='Input')  
+        param3.value= '32630'
+        param4 = arcpy.Parameter(name='param4', displayName='Interval',parameterType='Optional',
+                                    datatype='GPLinearUnit', direction='Input')
+        param4.value = '10 METERS'   
+        param5 = arcpy.Parameter(name='param5', displayName='Output FeatureClass', datatype='DEFeatureClass',
+                                    direction='Output', parameterType='Required')
+        param6 = arcpy.Parameter(name='param6', displayName='Export to File', datatype='String',
+                                    direction='Input', parameterType='Optional')
+        param6.filter.type = 'ValueList'
+        param6.filter.list = ['NO_EXPORT_TO_FILE','EXPORT_TO_FILE'] 
+        param6.value = param6.filter.list[0] 
+        param7 = arcpy.Parameter(name='param7', displayName='Export File',parameterType='Optional',
+                                    datatype='DEFile', direction='Output')
+        #param7.filter.list = ['.xls']
+        params = [param0,param1,param2,param3,param4,param5,param6,param7]
+        return params
+
+    def isLicensed(self):
+        """Set whether tool is licensed to execute."""
+        return True
+
+    def updateParameters(self, params):
+        """Modify the values and properties of parameters before internal
+        validation is performed.  This method is called whenever a parameter
+        has been changed."""
+        params[7].enabled = 'True' if params[6].valueAsText == 'EXPORT_TO_FILE' else 'False'
+        return
+
+    def updateMessages(self, params):
+        """Modify the messages created by internal validation for each tool
+        parameter.  This method is called after internal validation."""
+        if params[0].value:
+            if not ((params[0].valueAsText).endswith('.csv') or (params[0].valueAsText).endswith('.txt')):
+                params[0].setErrorMessage('Invalid Table Feature')
+        return
+
+    def execute(self, params, messages):
+        """The source code of the tool."""
+        table_to_points(params[0].valueAsText,params[1].valueAsText,
+                        params[2].valueAsText,params[3].valueAsText,
+                        params[4].valueAsText,params[5].valueAsText,
+                        params[6].valueAsText,params[7].valueAsText)
         return
